@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>仓库管理系统 - 访问二维码（打印版）</title>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: #fff;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+  }
+  .print-card {
+    text-align: center;
+    padding: 30px;
+    max-width: 500px;
+  }
+  h1 {
+    font-size: 28px;
+    color: #2c3e50;
+    margin-bottom: 6px;
+    letter-spacing: 2px;
+  }
+  .subtitle {
+    font-size: 14px;
+    color: #7f8c8d;
+    margin-bottom: 24px;
+  }
+  .qrcode-wrapper {
+    display: inline-block;
+    padding: 20px;
+    background: #fff;
+    border: 3px solid #2c3e50;
+    border-radius: 16px;
+    margin-bottom: 20px;
+  }
+  .qrcode-wrapper canvas,
+  .qrcode-wrapper img {
+    display: block;
+    width: 180px !important;
+    height: 180px !important;
+  }
+  .url-text {
+    font-size: 14px;
+    color: #3498db;
+    word-break: break-all;
+    margin-bottom: 6px;
+    font-weight: 500;
+  }
+  .hint {
+    font-size: 17px;
+    color: #e74c3c;
+    margin-bottom: 22px;
+    line-height: 2;
+    text-align: left;
+    padding: 16px 20px;
+    background: #fff5f5;
+    border-left: 4px solid #e74c3c;
+    border-radius: 8px;
+  }
+  .footer {
+    margin-top: 20px;
+    font-size: 11px;
+    color: #bdc3c7;
+  }
+
+  /* 打印样式 */
+  @media print {
+    body { margin: 0; padding: 0; }
+    .print-card { padding: 10px; }
+    @page { margin: 10mm; size: auto; }
+  }
+</style>
+</head>
+<body>
+<div class="print-card">
+  <div class="hint">
+    ⚠️ 请严格扫码领用，领用必扫<br>
+    📋 扫码自动记录，库存数据清晰可查<br>
+    📦 库存不足时会及时补货，不耽误使用<br>
+    ⛔ 若不扫码直接取用，数据对不上<br>
+    大家急用时可能无法及时拿到物资
+  </div>
+
+  <div class="qrcode-wrapper">
+    <div id="qrcode"></div>
+  </div>
+
+  <div class="footer">
+    打印时间：<span id="printTime"></span>
+  </div>
+</div>
+
+<script>
+  const CLOUD_URL = 'https://9d16e8ab815e44f2a519aa52d3a6c1c8.app.codebuddy.work';
+  document.getElementById('printTime').textContent = new Date().toLocaleString('zh-CN');
+
+  new QRCode(document.getElementById('qrcode'), {
+    text: CLOUD_URL,
+    width: 180,
+    height: 180,
+    colorDark: '#2c3e50',
+    colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.M  // M级容错（15%），适合打印
+  });
+</script>
+</body>
+</html>
