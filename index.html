@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>仓库物资领用系统</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--primary:#4A90D9;--primary-dark:#3a7bc8;--bg:#f5f7fa;--card:#fff;--text:#2c3e50;--text-light:#7f8c8d;--danger:#e74c3c;--danger-bg:#fdf0ef;--success:#27ae60;--border:#e1e8ed;--shadow:0 2px 12px rgba(0,0,0,0.08);--radius:12px}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);line-height:1.6;-webkit-font-smoothing:antialiased}
+.navbar{background:var(--card);box-shadow:var(--shadow);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;flex-wrap:wrap;gap:10px}
+.navbar .logo{font-size:18px;font-weight:700;color:var(--primary)}
+.navbar .nav-links{display:flex;gap:12px}
+.navbar .nav-links a{color:var(--text);text-decoration:none;font-size:14px;font-weight:500;padding:6px 12px;border-radius:6px;transition:all .2s}
+.navbar .nav-links a:hover,.navbar .nav-links a.active{color:var(--primary);background:rgba(74,144,217,0.1)}
+.container{max-width:900px;margin:0 auto;padding:20px}
+.scan-section{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:24px;margin-bottom:20px;text-align:center}
+.scan-section h2{font-size:18px;margin-bottom:8px}
+.section-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;font-size:16px;font-weight:600}
+.section-title .count{font-size:13px;color:var(--text-light);font-weight:400}
+.inventory-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
+.item-group{display:flex;gap:14px;grid-column:1/-1}
+.item-group .item-card{flex:1;min-width:0}
+.item-card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;text-align:center;border:2px solid transparent;transition:border-color .3s}
+.item-card .item-name{font-size:15px;font-weight:600;margin-bottom:6px;color:var(--text)}
+.item-card .item-qty{font-size:32px;font-weight:800;color:var(--primary)}
+.item-card .item-unit{font-size:12px;color:var(--text-light)}
+.item-card.low-stock{border-color:var(--danger);background:var(--danger-bg)}
+.item-card.low-stock .item-qty{color:var(--danger)}
+.item-card .low-stock-badge{display:inline-block;background:var(--danger);color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;margin-top:4px}
+.item-card .item-actions{margin-top:12px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:8px 16px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s;text-decoration:none}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-success{background:var(--success);color:#fff}
+.btn-danger{background:var(--danger);color:#fff}
+.btn-outline{background:transparent;border:2px solid var(--border);color:var(--text)}
+.btn-sm{padding:6px 12px;font-size:12px}
+.btn-block{width:100%;padding:12px;font-size:15px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,0.15)}
+.btn-danger:hover:not(:disabled){background:#c0392b}
+.empty-state{text-align:center;padding:60px 20px;color:var(--text-light)}
+.toast-container{position:fixed;top:70px;right:20px;z-index:2000;display:flex;flex-direction:column;gap:10px}
+.toast{background:var(--card);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.15);padding:14px 18px;font-size:14px;font-weight:500;display:flex;align-items:center;gap:8px;min-width:280px;max-width:380px;animation:slideIn .3s ease;border-left:4px solid var(--primary)}
+.toast.success{border-left-color:var(--success)}.toast.error{border-left-color:var(--danger)}.toast.warning{border-left-color:#f39c12}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+.scan-status{margin-top:12px;padding:12px;border-radius:8px;font-size:15px;font-weight:600;display:none}
+.scan-status.success{background:#eafaf1;color:var(--success);display:block}
+.scan-status.error{background:var(--danger-bg);color:var(--danger);display:block}
+.scan-status.warning{background:#fef9e7;color:#f39c12;display:block}
+.modal-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;justify-content:center;align-items:flex-start;padding-top:15vh}
+.modal-overlay.active{display:flex}
+.modal{background:var(--card);border-radius:var(--radius);padding:24px;width:90%;max-width:400px;box-shadow:0 8px 32px rgba(0,0,0,0.2)}
+.modal h3{font-size:17px;margin-bottom:16px;text-align:center}
+.modal .form-group{margin-bottom:14px}
+.modal .form-group label{display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(--text)}
+.modal .form-group input{width:100%;padding:10px 14px;border:2px solid var(--border);border-radius:8px;font-size:15px;outline:none;transition:border-color .2s}
+.modal .form-group input:focus{border-color:var(--primary)}
+.modal .form-actions{display:flex;gap:10px;margin-top:20px}
+.admin-table{width:100%;border-collapse:collapse;background:var(--card);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
+.admin-table th,.admin-table td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border);font-size:14px}
+.admin-table th{background:#f8f9fa;font-weight:600;font-size:13px;color:var(--text-light)}
+.admin-table tr:last-child td{border-bottom:none}
+.log-list{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+.log-item{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);font-size:13px;gap:10px;flex-wrap:wrap}
+.log-item:last-child{border-bottom:none}
+.log-action{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;white-space:nowrap}
+.log-action.checkout{background:#fdf0ef;color:var(--danger)}
+.log-action.undo{background:#eafaf1;color:var(--success)}
+.log-action.add,.log-action.restock{background:#e8f4fd;color:var(--primary)}
+.log-action.edit{background:#fef9e7;color:#f39c12}
+.tabs{display:flex;gap:0;margin-bottom:20px;background:var(--card);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
+.tab-btn{flex:1;padding:12px;border:none;background:transparent;font-size:14px;font-weight:600;cursor:pointer;color:var(--text-light);border-bottom:3px solid transparent;transition:all .2s}
+.tab-btn.active{color:var(--primary);border-bottom-color:var(--primary);background:rgba(74,144,217,0.05)}
+.admin-form{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;margin-bottom:20px}
+.admin-form .form-row{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+.admin-form .form-row .form-group{flex:1;min-width:100px;margin-bottom:0}
+.qrcode-section{margin-top:20px;padding-top:20px;border-top:1px solid var(--border)}
+.qrcode-section h3{font-size:15px;margin-bottom:8px}
+.qrcode-box{display:inline-block;background:#fff;padding:12px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.1);margin:12px 0}
+.qrcode-box canvas,.qrcode-box img{display:block}
+.sync-note{font-size:12px;color:var(--text-light);margin-top:8px;padding:8px 12px;background:#fef9e7;border-radius:8px;text-align:left;line-height:1.6}
+@media(max-width:600px){.container{padding:14px}.inventory-grid{grid-template-columns:repeat(2,1fr)}.navbar{padding:10px 14px}.admin-form .form-row{flex-direction:column}}
+</style>
+</head>
+<body>
+
+<div class="navbar">
+  <div class="logo">📦 仓库物资领用系统</div>
+  <div class="nav-links">
+    <a href="#" onclick="showTab('checkout')" id="nav-checkout" class="active">领用</a>
+    <a href="#" onclick="showTab('admin')" id="nav-admin">管理</a>
+    <a href="#" onclick="showTab('logs')" id="nav-logs">记录</a>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- ====== 领用页面 ====== -->
+  <div id="tab-checkout" class="tab-content">
+    <div class="section-title">
+      <span>📦 当前库存</span>
+      <span class="count" id="item-count"></span>
+    </div>
+
+    <div id="inventory-grid" class="inventory-grid"></div>
+    <div id="empty-state" class="empty-state" style="display:none;">
+      <div style="font-size:48px;margin-bottom:12px">📭</div>
+      <p>暂无物资，请到管理后台添加</p>
+    </div>
+
+    <div class="sync-note" style="margin-top:20px">
+        💡 <b>云端共享模式</b>：所有设备的库存数据<b>实时同步</b>到云端。任何人在任何网络上领用/撤销，其他设备刷新页面后即可看到最新库存。
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== 管理页面 ====== -->
+  <div id="tab-admin" class="tab-content" style="display:none">
+    <div class="admin-form">
+      <h3 style="margin-bottom:14px;font-size:16px">➕ 添加物资</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label>物资名称</label>
+          <input type="text" id="add-name" placeholder="如：HUB（六合一）">
+        </div>
+        <div class="form-group">
+          <label>数量</label>
+          <input type="number" id="add-qty" placeholder="0" min="0" value="0">
+        </div>
+        <div class="form-group">
+          <label>预警阈值</label>
+          <input type="number" id="add-threshold" placeholder="3" min="1" value="3">
+        </div>
+        <div class="form-group" style="flex:0 0 auto">
+          <label>&nbsp;</label>
+          <button class="btn btn-primary" onclick="addItem()" style="white-space:nowrap">添加</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="admin-form">
+      <h3 style="margin-bottom:14px;font-size:16px">🔔 预警通知</h3>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div class="form-group" style="flex:1;min-width:260px;margin-bottom:0">
+          <label>飞书 Webhook 地址</label>
+          <input type="text" id="feishu-webhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxxxx" style="font-size:12px">
+        </div>
+        <button class="btn btn-primary" onclick="saveFeishuConfig()" style="white-space:nowrap">保存</button>
+        <button class="btn btn-outline" onclick="testFeishuNotify()" style="white-space:nowrap">🧪 测试发送</button>
+      </div>
+      <p style="font-size:11px;color:var(--text-light);margin-top:6px">💡 在飞书中添加「自定义机器人」获取 Webhook 地址。库存低于阈值时自动推送预警。</p>
+    </div>
+
+    <div class="admin-form">
+      <h3 style="margin-bottom:14px;font-size:16px">💾 数据管理</h3>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="exportData()">📤 导出数据</button>
+        <button class="btn btn-outline" onclick="document.getElementById('import-file').click()">📥 导入数据</button>
+        <button class="btn btn-outline" onclick="loadDemoData()">🔄 加载初始数据</button>
+        <button class="btn btn-outline" onclick="clearAllData()" style="color:var(--danger)">🗑️ 清空数据</button>
+      </div>
+      <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(event)">
+    </div>
+
+    <div class="section-title">
+      <span>📋 物资列表</span>
+    </div>
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>名称</th>
+          <th>库存</th>
+          <th>阈值</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="admin-table-body"></tbody>
+    </table>
+  </div>
+
+  <!-- ====== 记录页面 ====== -->
+  <div id="tab-logs" class="tab-content" style="display:none">
+    <div class="section-title">
+      <span>📝 操作记录</span>
+      <span class="count" id="log-count"></span>
+    </div>
+    <div id="log-list" class="log-list"></div>
+  </div>
+</div>
+
+<!-- 领用弹窗 -->
+<div id="checkout-modal" class="modal-overlay">
+  <div class="modal">
+    <h3>📤 领用物资</h3>
+    <p style="text-align:center;font-size:18px;font-weight:700;margin-bottom:16px" id="checkout-item-name"></p>
+    <div class="form-group">
+      <label>领用人姓名 *</label>
+      <input type="text" id="checkout-person" placeholder="请输入姓名" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label>领用数量</label>
+      <input type="number" id="checkout-amount" placeholder="1" min="1" value="1">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-outline btn-block" onclick="closeCheckoutModal()">取消</button>
+      <button class="btn btn-danger btn-block" onclick="confirmCheckout()">确认领用</button>
+    </div>
+  </div>
+</div>
+
+<!-- 撤销弹窗 -->
+<div id="undo-modal" class="modal-overlay">
+  <div class="modal">
+    <h3>↩️ 撤销领用</h3>
+    <p style="text-align:center;font-size:18px;font-weight:700;margin-bottom:16px" id="undo-item-name"></p>
+    <div class="form-group">
+      <label>操作人姓名</label>
+      <input type="text" id="undo-person" placeholder="请输入姓名" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label>撤销数量</label>
+      <input type="number" id="undo-amount" min="1" value="1" style="width:100%">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-outline btn-block" onclick="closeUndoModal()">取消</button>
+      <button class="btn btn-success btn-block" onclick="confirmUndo()">确认撤销</button>
+    </div>
+  </div>
+</div>
+
+<!-- 编辑弹窗 -->
+<div id="edit-modal" class="modal-overlay">
+  <div class="modal">
+    <h3>✏️ 编辑物资</h3>
+    <p style="text-align:center;font-size:16px;font-weight:600;margin-bottom:16px" id="edit-item-name"></p>
+    <div class="form-group">
+      <label>物资名称</label>
+      <input type="text" id="edit-name">
+    </div>
+    <div class="form-group">
+      <label>库存数量</label>
+      <input type="number" id="edit-qty" min="0">
+    </div>
+    <div class="form-group">
+      <label>预警阈值</label>
+      <input type="number" id="edit-threshold" min="1">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-outline btn-block" onclick="closeEditModal()">取消</button>
+      <button class="btn btn-primary btn-block" onclick="confirmEdit()">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<!-- QRCode 库 -->
+
+<script>
+// ===== 数据层 (云端共享 + localStorage 缓存) =====
+const STORAGE_KEY = 'warehouse_data';
+const BLOB_ID = '019f834c-c130-7ffd-93ce-99bdd0280896';
+const CLOUD_URL = 'https://jsonblob.com/api/jsonBlob/' + BLOB_ID;
+
+function getDefaultData() {
+  return { items: [], logs: [], nextId: 1 };
+}
+
+function loadLocal() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return getDefaultData();
+    const data = JSON.parse(raw);
+    if (!data.items || !data.logs) return getDefaultData();
+    return data;
+  } catch(e) { return getDefaultData(); }
+}
+
+// 从云端加载（真实数据源）
+async function loadCloud() {
+  try {
+    const res = await fetch(CLOUD_URL, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.items || !data.logs) return null;
+    return data;
+  } catch(e) { return null; }
+}
+
+// 主加载：云端优先，失败用本地
+async function loadData() {
+  const cloud = await loadCloud();
+  if (cloud) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(cloud));
+    return cloud;
+  }
+  return loadLocal();
+}
+
+function saveLocal(data) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+// 保存：先写本地（立刻生效），再异步同步云端
+function saveData(data) {
+  saveLocal(data);
+  syncCloud(data);
+}
+
+// 异步同步到云端，失败静默重试
+let _syncTimer = null;
+function syncCloud(data) {
+  clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(async () => {
+    try {
+      const res = await fetch(CLOUD_URL, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (!res.ok) console.warn('云端同步失败: ' + res.status);
+    } catch(e) { console.warn('云端同步异常: ' + e.message); }
+  }, 300);
+}
+
+function genId() {
+  const data = loadLocal();
+  const id = 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+  data.nextId = (data.nextId || 1) + 1;
+  saveLocal(data);
+  return id;
+}
+
+// ===== Toast =====
+function showToast(msg, type) {
+  const c = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = 'toast ' + (type||'info');
+  t.textContent = (type==='success'?'✅ ' : type==='error'?'❌ ' : type==='warning'?'⚠️ ':'ℹ️ ') + msg;
+  c.appendChild(t);
+  setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity .3s'; setTimeout(()=>t.remove(),300); }, 4000);
+}
+
+// ===== 库存渲染 =====
+function renderInventory() {
+  const data = loadLocal();
+  const grid = document.getElementById('inventory-grid');
+  const empty = document.getElementById('empty-state');
+  const countEl = document.getElementById('item-count');
+
+  if (!data.items.length) {
+    grid.innerHTML = '';
+    empty.style.display = 'block';
+    countEl.textContent = '';
+    document.getElementById('admin-table-body').innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-light);padding:30px">暂无物资</td></tr>';
+    return;
+  }
+
+  empty.style.display = 'none';
+  countEl.textContent = '共 ' + data.items.length + ' 种物资';
+
+  const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const makeCard = (item) => {
+    const low = item.quantity < item.threshold;
+    return '<div class="item-card'+(low?' low-stock':'')+'">'+
+      '<div class="item-name">'+esc(item.name)+'</div>'+
+      '<div class="item-qty">'+item.quantity+'</div>'+
+      '<div class="item-unit">个（预警: '+item.threshold+'）</div>'+
+      (low?'<div class="low-stock-badge">库存不足!</div>':'')+
+      '<div class="item-actions">'+
+        '<button class="btn btn-danger btn-sm" onclick="openCheckoutModal(\''+item.id+'\',\''+esc(item.name)+'\')" '+(item.quantity<=0?'disabled':'')+'>领用</button>'+
+        '<button class="btn btn-outline btn-sm" onclick="openUndoModal(\''+item.id+'\',\''+esc(item.name)+'\')">撤销</button>'+
+      '</div></div>';
+  };
+
+  // 按 group 分组（不要求连续）
+  const groupMap = {};
+  data.items.forEach((item, idx) => {
+    if (item.group) {
+      if (!groupMap[item.group]) groupMap[item.group] = { items: [], firstIdx: idx };
+      groupMap[item.group].items.push(item);
+    }
+  });
+  const groupedIds = new Set();
+  Object.values(groupMap).forEach(g => g.items.slice(1).forEach(it => groupedIds.add(it.id)));
+
+  const cards = [];
+  data.items.forEach(item => {
+    if (groupedIds.has(item.id)) return;
+    if (item.group && groupMap[item.group]) {
+      const g = groupMap[item.group];
+      cards.push('<div class="item-group" data-group="'+item.group+'">'+g.items.map(makeCard).join('')+'</div>');
+    } else {
+      cards.push(makeCard(item));
+    }
+  });
+  grid.innerHTML = cards.join('');
+
+  renderAdminTable();
+}
+
+function renderAdminTable() {
+  const data = loadLocal();
+  const tbody = document.getElementById('admin-table-body');
+  if (!data.items.length) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-light);padding:30px">暂无物资</td></tr>'; return; }
+  tbody.innerHTML = data.items.map(item => {
+    const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return '<tr>'+
+      '<td><b>'+esc(item.name)+'</b></td>'+
+      '<td style="color:'+(item.quantity<item.threshold?'var(--danger)':'var(--text)')+'">'+item.quantity+'</td>'+
+      '<td>'+item.threshold+'</td>'+
+      '<td>'+
+        '<button class="btn btn-primary btn-sm" onclick="openEditModal(\''+item.id+'\')">编辑</button> '+
+        '<button class="btn btn-outline btn-sm" onclick="restockItem(\''+item.id+'\',\''+esc(item.name).replace(/'/g,"\\'")+'\')">入库</button> '+
+        '<button class="btn btn-outline btn-sm" style="color:var(--danger)" onclick="deleteItem(\''+item.id+'\')">删除</button>'+
+      '</td></tr>';
+  }).join('');
+}
+
+function renderLogs() {
+  const data = loadLocal();
+  document.getElementById('log-count').textContent = '共 ' + data.logs.length + ' 条';
+  const list = document.getElementById('log-list');
+  if (!data.logs.length) { list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-light)">暂无记录</div>'; return; }
+  list.innerHTML = data.logs.slice(0,200).map(log => {
+    const dt = new Date(log.timestamp);
+    const time = dt.toLocaleString('zh-CN');
+    const actionLabels = {checkout:'领用',undo:'撤销',add:'新增',edit:'编辑',restock:'入库',delete:'删除',import:'导入'};
+    const qtySign = log.action === 'checkout' ? '-' : log.action === 'undo' || log.action==='restock' || log.action==='add' ? '+' : '';
+    return '<div class="log-item">'+
+      '<span style="flex:1;min-width:120px"><span class="log-action '+log.action+'">'+(actionLabels[log.action]||log.action)+'</span> <b>'+log.itemName+'</b>'+'</span>'+
+      '<span style="color:var(--primary);font-weight:600">'+(log.action==='delete' ? '' : qtySign + Math.abs(log.quantity||0))+'</span>'+
+      (log.person ? '<span style="color:var(--text-light);font-size:12px">'+log.person+'</span>' : '')+
+      '<span style="color:var(--text-light);font-size:11px">'+time+'</span>'+
+    '</div>';
+  }).join('');
+}
+
+// ===== 领用弹窗 =====
+let currentCheckoutId = null;
+function openCheckoutModal(id, name) {
+  currentCheckoutId = id;
+  document.getElementById('checkout-item-name').textContent = name;
+  document.getElementById('checkout-person').value = '';
+  document.getElementById('checkout-amount').value = '1';
+  document.getElementById('checkout-modal').classList.add('active');
+  setTimeout(() => document.getElementById('checkout-person').focus(), 100);
+}
+function closeCheckoutModal() { document.getElementById('checkout-modal').classList.remove('active'); currentCheckoutId = null; }
+function confirmCheckout() {
+  const person = document.getElementById('checkout-person').value.trim();
+  if (!person) { showToast('请输入领用人姓名','error'); document.getElementById('checkout-person').focus(); return; }
+  const amount = parseInt(document.getElementById('checkout-amount').value) || 1;
+  if (amount <= 0) { showToast('领用数量必须大于0','error'); return; }
+  const data = loadLocal();
+  const item = data.items.find(it => it.id === currentCheckoutId);
+  if (!item) { showToast('物资不存在','error'); return; }
+  if (item.quantity < amount) { showToast('库存仅剩 '+item.quantity+' 个，无法领用 '+amount+' 个','error'); return; }
+  const before = item.quantity;
+  item.quantity -= amount;
+  const low = item.quantity < item.threshold;
+  data.logs.unshift({ id:'log_'+Date.now().toString(36), itemId:item.id, itemName:item.name, action:'checkout', quantity: -amount, before, after:item.quantity, timestamp:new Date().toISOString(), person });
+  saveData(data);
+  showToast((low?'⚠️ ':'')+'领用成功！"'+item.name+'" 领用 '+amount+' 个，剩余 '+item.quantity+' 个', low?'warning':'success');
+  if (low && 'Notification' in window && Notification.permission === 'granted') {
+    new Notification('⚠️ 库存预警', { body: '请及时采购「'+item.name+'」，仅剩 '+item.quantity+' 个', tag:'stock' });
+  }
+  if (low) { notifyLowStock(item.name, item.quantity, item.threshold, person); }
+  closeCheckoutModal();
+  renderInventory();
+  renderLogs();
+}
+
+// ===== 撤销弹窗 =====
+let currentUndoId = null;
+function openUndoModal(id, name) {
+  currentUndoId = id;
+  document.getElementById('undo-item-name').textContent = name;
+  document.getElementById('undo-person').value = '';
+  document.getElementById('undo-amount').value = '1';
+  document.getElementById('undo-modal').classList.add('active');
+  setTimeout(() => document.getElementById('undo-person').focus(), 100);
+}
+function closeUndoModal() { document.getElementById('undo-modal').classList.remove('active'); currentUndoId = null; }
+function confirmUndo() {
+  const person = document.getElementById('undo-person').value.trim();
+  const amount = parseInt(document.getElementById('undo-amount').value) || 1;
+  if (amount <= 0) { showToast('撤销数量必须大于0','error'); return; }
+  const data = loadLocal();
+  const item = data.items.find(it => it.id === currentUndoId);
+  if (!item) { showToast('物资不存在','error'); return; }
+  const before = item.quantity;
+  item.quantity += amount;
+  data.logs.unshift({ id:'log_'+Date.now().toString(36), itemId:item.id, itemName:item.name, action:'undo', quantity:amount, before, after:item.quantity, timestamp:new Date().toISOString(), person: person || '' });
+  saveData(data);
+  showToast('撤销成功！"'+item.name+'" 恢复 +'+amount+'，现 '+item.quantity+' 个','success');
+  closeUndoModal();
+  renderInventory();
+  renderLogs();
+}
+
+// ===== 编辑弹窗 =====
+let currentEditId = null;
+function openEditModal(id) {
+  const data = loadLocal();
+  const item = data.items.find(it => it.id === id);
+  if (!item) return;
+  currentEditId = id;
+  document.getElementById('edit-item-name').textContent = item.name;
+  document.getElementById('edit-name').value = item.name;
+  document.getElementById('edit-qty').value = item.quantity;
+  document.getElementById('edit-threshold').value = item.threshold;
+  document.getElementById('edit-modal').classList.add('active');
+}
+function closeEditModal() { document.getElementById('edit-modal').classList.remove('active'); currentEditId = null; }
+function confirmEdit() {
+  const name = document.getElementById('edit-name').value.trim();
+  if (!name) { showToast('名称不能为空','error'); return; }
+  const qty = parseInt(document.getElementById('edit-qty').value) || 0;
+  const threshold = parseInt(document.getElementById('edit-threshold').value) || 3;
+  const data = loadLocal();
+  const item = data.items.find(it => it.id === currentEditId);
+  if (!item) return;
+  const before = item.quantity;
+  item.name = name;
+  item.quantity = qty;
+  item.threshold = threshold;
+  data.logs.unshift({ id:'log_'+Date.now().toString(36), itemId:item.id, itemName:item.name, action:'edit', quantity: item.quantity-before, before, after:item.quantity, timestamp:new Date().toISOString() });
+  saveData(data);
+  showToast('保存成功','success');
+  closeEditModal();
+  renderInventory();
+  renderLogs();
+}
+
+// ===== 管理操作 =====
+function addItem() {
+  const name = document.getElementById('add-name').value.trim();
+  if (!name) { showToast('请输入物资名称','error'); return; }
+  const qty = parseInt(document.getElementById('add-qty').value) || 0;
+  const threshold = parseInt(document.getElementById('add-threshold').value) || 3;
+  const data = loadLocal();
+  const item = { id: genId(), name, quantity: qty, threshold, createdAt: new Date().toISOString() };
+  data.items.push(item);
+  data.logs.unshift({ id:'log_'+Date.now().toString(36), itemId:item.id, itemName:item.name, action:'add', quantity:qty, before:0, after:qty, timestamp:new Date().toISOString() });
+  saveData(data);
+  document.getElementById('add-name').value = '';
+  document.getElementById('add-qty').value = '0';
+  showToast('已添加「'+name+'」','success');
+  renderInventory();
+  renderLogs();
+}
+
+function restockItem(id, name) {
+  const qtyStr = prompt('请输入「'+name+'」的入库数量：', '1');
+  if (qtyStr === null) return;
+  const qty = parseInt(qtyStr);
+  if (isNaN(qty) || qty <= 0) { showToast('请输入有效的正整数','error'); return; }
+  const data = loadLocal();
+  const item = data.items.find(it => it.id === id);
+  if (!item) return;
+  const before = item.quantity;
+  item.quantity += qty;
+  data.logs.unshift({ id:'log_'+Date.now().toString(36), itemId:item.id, itemName:item.name, action:'restock', quantity:qty, before, after:item.quantity, timestamp:new Date().toISOString(), note:'入库 +'+qty });
+  saveData(data);
+  showToast('「'+item.name+'」入库 +'+qty+'，现 '+item.quantity+' 个','success');
+  renderInventory();
+  renderLogs();
+}
+
+function deleteItem(id) {
+  if (!confirm('确定要删除这个物资吗？此操作不可撤销！')) return;
+  const data = loadLocal();
+  const idx = data.items.findIndex(it => it.id === id);
+  if (idx === -1) return;
+  const removed = data.items.splice(idx, 1)[0];
+  data.logs.unshift({ id:'log_'+Date.now().toString(36), itemId:id, itemName:removed.name, action:'delete', quantity:0, before:removed.quantity, after:0, timestamp:new Date().toISOString() });
+  saveData(data);
+  showToast('已删除「'+removed.name+'」','success');
+  renderInventory();
+  renderLogs();
+}
+
+function exportData() {
+  const data = loadLocal();
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'warehouse_backup_'+new Date().toISOString().slice(0,10)+'.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('数据已导出','success');
+}
+
+function importData(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data.items || !Array.isArray(data.items)) throw new Error('Invalid format');
+      saveData(data);
+      showToast('数据导入成功！共 '+data.items.length+' 种物资','success');
+      renderInventory();
+      renderLogs();
+    } catch(err) { showToast('导入失败：文件格式不正确','error'); }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function clearAllData() {
+  if (!confirm('⚠️ 确定要清空所有数据吗？此操作不可撤销！\n\n建议先导出备份。')) return;
+  if (!confirm('再次确认：真的要清空所有库存数据和操作记录吗？')) return;
+  var empty = getDefaultData();
+  saveData(empty);
+  showToast('数据已清空','success');
+  renderInventory();
+  renderLogs();
+}
+
+// ===== 页面切换 =====
+function showTab(tab) {
+  ['checkout','admin','logs'].forEach(t => {
+    document.getElementById('tab-'+t).style.display = t===tab?'block':'none';
+    document.getElementById('nav-'+t).classList.toggle('active', t===tab);
+  });
+  if (tab === 'admin') renderAdminTable();
+  if (tab === 'logs') renderLogs();
+}
+
+// ===== 访问二维码 =====
+// ===== 键盘事件 =====
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeCheckoutModal(); closeUndoModal(); closeEditModal(); }
+});
+document.getElementById('checkout-person').addEventListener('keydown', e => { if (e.key === 'Enter') confirmCheckout(); });
+document.getElementById('undo-person').addEventListener('keydown', e => { if (e.key === 'Enter') confirmUndo(); });
+
+// ===== 通知权限 =====
+if ('Notification' in window && Notification.permission === 'default') {
+  setTimeout(() => Notification.requestPermission(), 2000);
+}
+
+// ===== 飞书预警通知 =====
+function getFeishuWebhook() {
+  var data = loadLocal();
+  return data.feishuWebhook || '';
+}
+
+function saveFeishuConfig() {
+  var url = document.getElementById('feishu-webhook').value.trim();
+  var data = loadLocal();
+  data.feishuWebhook = url;
+  saveData(data);
+  showToast(url ? '飞书 Webhook 已保存' : '飞书 Webhook 已清除', 'success');
+}
+
+function testFeishuNotify() {
+  var webhook = getFeishuWebhook();
+  if (!webhook) { showToast('请先填写飞书 Webhook 地址','error'); return; }
+  sendFeishuMsg(webhook, '🧪 仓库系统测试消息', '这是一条测试消息，如果你收到说明飞书通知配置成功！');
+  showToast('测试消息已发送，请查看飞书','success');
+}
+
+function sendFeishuMsg(webhook, title, content) {
+  var body = JSON.stringify({
+    msg_type: 'interactive',
+    card: {
+      header: { title: { tag: 'plain_text', content: title }, template: 'red' },
+      elements: [
+        { tag: 'div', text: { tag: 'lark_md', content: content } },
+        { tag: 'hr' },
+        { tag: 'note', elements: [{ tag: 'plain_text', content: '仓库管理系统 · ' + new Date().toLocaleString('zh-CN') }] }
+      ]
+    }
+  });
+  // 尝试直接发送（部分飞书 webhook 支持 CORS）
+  fetch(webhook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body })
+    .then(r => { if (!r.ok) console.warn('飞书通知发送失败: ' + r.status); })
+    .catch(e => console.warn('飞书通知发送异常: ' + e.message));
+}
+
+function notifyLowStock(itemName, quantity, threshold, person) {
+  var webhook = getFeishuWebhook();
+  if (!webhook) return;
+  var personStr = person ? ' | 领用人: ' + person : '';
+  sendFeishuMsg(webhook,
+    '⚠️ 库存预警',
+    '**物资**: ' + itemName + '\n**当前库存**: ' + quantity + ' 个\n**预警阈值**: ' + threshold + ' 个\n**状态**: 库存不足，请及时采购！' + personStr
+  );
+}
+
+// 页面加载时自动填充已保存的 webhook
+(function loadFeishuConfig() {
+  setTimeout(function() {
+    var el = document.getElementById('feishu-webhook');
+    if (el) { var wh = getFeishuWebhook(); if (wh) el.value = wh; }
+  }, 600);
+})();
+
+// ===== 静默加载初始数据（首次访问，不弹确认框） =====
+function silentLoadDemoData() {
+  const now = new Date().toISOString();
+  const items = [
+    {id:'item_hub',name:'HUB（六合一）',quantity:14,threshold:3,createdAt:now},
+    {id:'item_plug',name:'插头固定器',quantity:4,threshold:3,createdAt:now},
+    {id:'item_clip',name:'线路整理扣',quantity:10,threshold:3,createdAt:now},
+    {id:'item_psufix',name:'排插固定器',quantity:7,threshold:3,createdAt:now},
+    {id:'item_dupont',name:'杜邦线',quantity:150,threshold:3,createdAt:now},
+    {id:'item_psu',name:'排插',quantity:5,threshold:3,createdAt:now},
+    {id:'item_pcan',name:'PCAN',quantity:7,threshold:3,createdAt:now},
+    {id:'item_serial',name:'针插式串口线',quantity:6,threshold:3,createdAt:now,group:'serial'},
+    {id:'item_gold',name:'金手指',quantity:5,threshold:3,createdAt:now},
+    {id:'item_can',name:'CAN板',quantity:4,threshold:3,createdAt:now},
+    {id:'item_usblan',name:'USB网卡',quantity:19,threshold:3,createdAt:now},
+    {id:'item_usb',name:'U盘',quantity:13,threshold:3,createdAt:now},
+    {id:'item_3in1',name:'一拖三线材',quantity:28,threshold:3,createdAt:now},
+    {id:'item_adapter',name:'电源适配器',quantity:2,threshold:3,createdAt:now,group:'power'},
+    {id:'item_pwr',name:'电源线',quantity:3,threshold:3,createdAt:now,group:'power'},
+    {id:'item_pwracc',name:'电源线B+ACC',quantity:80,threshold:3,createdAt:now,group:'power'},
+    {id:'item_com',name:'串口小板',quantity:10,threshold:3,createdAt:now,group:'serial'}
+  ];
+  const logs = items.map(item => ({
+    id:'log_init_'+item.id, itemId:item.id, itemName:item.name, action:'add',
+    quantity:item.quantity, before:0, after:item.quantity, timestamp:now, note:'初始化'
+  }));
+  saveData({ items, logs, nextId: 100 });
+}
+
+function loadDemoData() {
+  if (!confirm('将加载17种初始物资（会覆盖当前数据），确定？')) return;
+  silentLoadDemoData();
+  showToast('初始数据加载成功！共 17 种物资','success');
+  renderInventory();
+  renderLogs();
+}
+
+// 主初始化：云端数据优先
+async function init() {
+  // 1. 尝试从云端加载
+  var cloud = await loadCloud();
+  if (cloud && cloud.items && cloud.items.length > 0) {
+    saveLocal(cloud);
+    showToast('已从云端同步最新库存数据', 'success');
+  } else {
+    // 2. 云端无数据时，加载本地数据
+    var local = loadLocal();
+    if (!local.items.length) {
+      silentLoadDemoData();  // 首次访问，静默加载初始数据
+      showToast('已自动加载初始库存数据', 'success');
+    } else {
+      // 本地有数据但云端没有，上传到云端
+      syncCloud(local);
+    }
+  }
+  // 3. 数据迁移：为已有串口/电源相关物资添加分组标记
+  var data = loadLocal();
+  var migrated = false;
+  data.items.forEach(function(item) {
+    if ((item.id === 'item_serial' || item.id === 'item_com' || item.name === '串口线') && !item.group) {
+      item.group = 'serial'; migrated = true;
+    }
+    if ((item.id === 'item_adapter' || item.id === 'item_pwr' || item.id === 'item_pwracc') && !item.group) {
+      item.group = 'power'; migrated = true;
+    }
+  });
+  if (migrated) { saveLocal(data); syncCloud(data); }
+  renderInventory();
+  renderLogs();
+}
+
+init();
+</script>
+</body>
+</html>
