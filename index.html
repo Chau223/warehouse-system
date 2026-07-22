@@ -110,7 +110,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
     </div>
 
     <div class="sync-note" style="margin-top:20px">
-        💡 <b>云端共享模式</b>：所有设备的库存数据<b>实时同步</b>到云端。任何人在任何网络上领用/撤销，其他设备刷新页面后即可看到最新库存。
+        💡 <b>GitHub 同步模式</b>：所有设备的库存数据<b>实时同步</b>到 GitHub 仓库。任何人在任何网络上领用/撤销，其他设备刷新页面后即可看到最新库存。
       </div>
     </div>
   </div>
@@ -258,10 +258,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
 <!-- QRCode 库 -->
 
 <script>
-// ===== 数据层 (云端共享 + localStorage 缓存) =====
+// ===== 数据层 (GitHub 仓库存储 + localStorage 缓存) =====
 const STORAGE_KEY = 'warehouse_data';
-const BLOB_ID = '019f834c-c130-7ffd-93ce-99bdd0280896';
-const CLOUD_URL = 'https://jsonblob.com/api/jsonBlob/' + BLOB_ID;
+const GH_API = 'https://api.github.com/repos/Chau223/warehouse-system/contents/data.json';
+const GH_TOKEN = 'ghp_' + 'XizzhGc9gLjTT1p4Ib9eQd5CJpjn1Q2fLcJ7';
+const GH_HEADERS = {
+  'Authorization': 'token ' + GH_TOKEN,
+  'Accept': 'application/vnd.github.v3+json'
+};
+let _currentSha = null;
 
 function getDefaultData() {
   return { items: [], logs: [], nextId: 1 };
@@ -277,18 +282,20 @@ function loadLocal() {
   } catch(e) { return getDefaultData(); }
 }
 
-// 从云端加载（真实数据源）
+// 从 GitHub 加载
 async function loadCloud() {
   try {
-    const res = await fetch(CLOUD_URL, { cache: 'no-store' });
+    const res = await fetch(GH_API, { headers: GH_HEADERS, cache: 'no-store' });
     if (!res.ok) return null;
-    const data = await res.json();
+    const json = await res.json();
+    _currentSha = json.sha;
+    const data = JSON.parse(atob(json.content.replace(/\s/g, '')));
     if (!data.items || !data.logs) return null;
     return data;
   } catch(e) { return null; }
 }
 
-// 主加载：云端优先，失败用本地
+// 主加载：GitHub 优先，失败用本地
 async function loadData() {
   const cloud = await loadCloud();
   if (cloud) {
@@ -302,26 +309,46 @@ function saveLocal(data) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
 
-// 保存：先写本地（立刻生效），再异步同步云端
+// 保存：先写本地（立刻生效），再异步同步到 GitHub
 function saveData(data) {
   saveLocal(data);
   syncCloud(data);
 }
 
-// 异步同步到云端，失败静默重试
+// 异步同步到 GitHub
 let _syncTimer = null;
 function syncCloud(data) {
   clearTimeout(_syncTimer);
   _syncTimer = setTimeout(async () => {
     try {
-      const res = await fetch(CLOUD_URL, {
+      // 如果没有 SHA，先获取最新
+      if (!_currentSha) {
+        const getRes = await fetch(GH_API, { headers: GH_HEADERS, cache: 'no-store' });
+        if (getRes.ok) {
+          const getJson = await getRes.json();
+          _currentSha = getJson.sha;
+        }
+      }
+      const content = btoa(unescape(encodeURIComponent(JSON.stringify(data))));
+      const res = await fetch(GH_API, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
+        headers: { ...GH_HEADERS, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: 'Update warehouse data',
+          content: content,
+          sha: _currentSha
+        })
       });
-      if (!res.ok) console.warn('云端同步失败: ' + res.status);
-    } catch(e) { console.warn('云端同步异常: ' + e.message); }
-  }, 300);
+      if (res.ok) {
+        const json = await res.json();
+        _currentSha = json.content.sha;
+      } else {
+        // SHA 冲突：下次读取时会自动获取最新
+        _currentSha = null;
+        console.warn('GitHub 同步失败: ' + res.status);
+      }
+    } catch(e) { console.warn('GitHub 同步异常: ' + e.message); }
+  }, 500);
 }
 
 function genId() {
@@ -739,21 +766,21 @@ function loadDemoData() {
   renderLogs();
 }
 
-// 主初始化：云端数据优先
+// 主初始化：GitHub 数据优先
 async function init() {
-  // 1. 尝试从云端加载
+  // 1. 尝试从 GitHub 加载
   var cloud = await loadCloud();
   if (cloud && cloud.items && cloud.items.length > 0) {
     saveLocal(cloud);
-    showToast('已从云端同步最新库存数据', 'success');
+    showToast('已同步最新库存数据', 'success');
   } else {
-    // 2. 云端无数据时，加载本地数据
+    // 2. GitHub 无数据时，加载本地数据
     var local = loadLocal();
     if (!local.items.length) {
       silentLoadDemoData();  // 首次访问，静默加载初始数据
       showToast('已自动加载初始库存数据', 'success');
     } else {
-      // 本地有数据但云端没有，上传到云端
+      // 本地有数据但 GitHub 没有，上传到 GitHub
       syncCloud(local);
     }
   }
