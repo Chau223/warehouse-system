@@ -712,7 +712,7 @@ function silentLoadDemoData() {
     {id:'item_psufix',name:'排插固定器',quantity:7,threshold:3,createdAt:now},
     {id:'item_dupont',name:'杜邦线',quantity:150,threshold:3,createdAt:now},
     {id:'item_psu',name:'排插',quantity:5,threshold:3,createdAt:now},
-    {id:'item_pcan',name:'PCAN',quantity:7,threshold:3,createdAt:now},
+    {id:'item_pcan',name:'PCAN',quantity:7,threshold:3,createdAt:now,group:'pcan'},
     {id:'item_serial',name:'针插式串口线',quantity:6,threshold:3,createdAt:now,group:'serial'},
     {id:'item_gold',name:'金手指',quantity:5,threshold:3,createdAt:now},
     {id:'item_can',name:'CAN板',quantity:4,threshold:3,createdAt:now},
@@ -757,7 +757,7 @@ async function init() {
       syncCloud(local);
     }
   }
-  // 3. 数据迁移：为已有串口/电源相关物资添加分组标记
+  // 3. 数据迁移：为已有串口/电源/PCAN相关物资添加分组标记
   var data = loadLocal();
   var migrated = false;
   data.items.forEach(function(item) {
@@ -766,6 +766,9 @@ async function init() {
     }
     if ((item.id === 'item_adapter' || item.id === 'item_pwr' || item.id === 'item_pwracc') && !item.group) {
       item.group = 'power'; migrated = true;
+    }
+    if (item.name && item.name.toUpperCase().indexOf('PCAN') !== -1 && !item.group) {
+      item.group = 'pcan'; migrated = true;
     }
   });
   if (migrated) { saveLocal(data); syncCloud(data); }
