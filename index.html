@@ -22,7 +22,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
 .item-group{display:flex;gap:14px;grid-column:1/-1}
 .item-group .item-card{flex:1;min-width:0}
 .item-card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;text-align:center;border:2px solid transparent;transition:border-color .3s}
+.item-card .item-img-wrap{height:100px;display:flex;align-items:center;justify-content:center;margin-bottom:10px;background:#f8f9fa;border-radius:8px;overflow:hidden}
+.item-card .item-img{max-width:100%;max-height:100px;object-fit:contain}
+.item-card .item-img-placeholder{font-size:38px;opacity:.35}
 .item-card .item-name{font-size:15px;font-weight:600;margin-bottom:6px;color:var(--text)}
+.admin-table-wrap{overflow-x:auto;background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow)}
+.admin-table-wrap .admin-table{box-shadow:none;border-radius:0}
+.thumb{width:38px;height:38px;border-radius:6px;object-fit:cover;vertical-align:middle;background:#f8f9fa;border:1px solid var(--border)}
+.preview-thumb{max-width:80px;max-height:80px;border-radius:8px;border:1px solid var(--border)}
 .item-card .item-qty{font-size:32px;font-weight:800;color:var(--primary)}
 .item-card .item-unit{font-size:12px;color:var(--text-light)}
 .item-card.low-stock{border-color:var(--danger);background:var(--danger-bg)}
@@ -132,6 +139,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
           <label>预警阈值</label>
           <input type="number" id="add-threshold" placeholder="3" min="1" value="3">
         </div>
+        <div class="form-group" style="flex:1;min-width:160px">
+          <label>图片（可选）</label>
+          <input type="file" id="add-image" accept="image/*" onchange="previewImage(this,'add-image-preview',true)">
+          <div id="add-image-preview" style="margin-top:6px"></div>
+        </div>
         <div class="form-group" style="flex:0 0 auto">
           <label>&nbsp;</label>
           <button class="btn btn-primary" onclick="addItem()" style="white-space:nowrap">添加</button>
@@ -166,9 +178,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
     <div class="section-title">
       <span>📋 物资列表</span>
     </div>
+    <div class="admin-table-wrap">
     <table class="admin-table">
       <thead>
         <tr>
+          <th>图片</th>
           <th>名称</th>
           <th>库存</th>
           <th>阈值</th>
@@ -177,6 +191,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
       </thead>
       <tbody id="admin-table-body"></tbody>
     </table>
+    </div>
   </div>
 
   <!-- ====== 记录页面 ====== -->
@@ -245,6 +260,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
     <div class="form-group">
       <label>预警阈值</label>
       <input type="number" id="edit-threshold" min="1">
+    </div>
+    <div class="form-group">
+      <label>物资图片</label>
+      <input type="file" id="edit-image" accept="image/*" onchange="previewImage(this,'edit-image-preview',false)">
+      <div id="edit-image-preview" style="margin-top:6px"></div>
+      <div style="margin-top:8px">
+        <button type="button" class="btn btn-outline btn-sm" onclick="removeEditImage()">🗑️ 移除图片</button>
+      </div>
     </div>
     <div class="form-actions">
       <button class="btn btn-outline btn-block" onclick="closeEditModal()">取消</button>
@@ -371,6 +394,106 @@ function showToast(msg, type) {
   setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity .3s'; setTimeout(()=>t.remove(),300); }, 4000);
 }
 
+// ===== 物资图片 =====
+const IMG_BASE = 'https://chau223.github.io/warehouse-system/images/';
+let _addImage = null;        // { base64, ext }
+let _addImagePromise = null;
+let _editImage = null;       // { base64, ext }
+let _editImagePromise = null;
+let _editImageRemoved = false;
+
+// 前端压缩图片：限制最大边长、输出 JPEG base64
+function compressImage(file, maxSize, quality) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const img = new Image();
+      img.onload = function() {
+        let w = img.width, h = img.height;
+        const scale = Math.min(1, maxSize / Math.max(w, h));
+        w = Math.max(1, Math.round(w * scale));
+        h = Math.max(1, Math.round(h * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve(dataUrl.split(',')[1]);
+      };
+      img.onerror = () => reject(new Error('image load failed'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('file read failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
+// 选择图片后的预览 + 压缩
+function previewImage(input, previewId, isAdd) {
+  const file = input.files && input.files[0];
+  const preview = document.getElementById(previewId);
+  if (!file) { preview.innerHTML = ''; if (isAdd) _addImage = null; else _editImage = null; return; }
+  const url = URL.createObjectURL(file);
+  preview.innerHTML = '<img src="'+url+'" class="preview-thumb" alt="预览">';
+  const p = compressImage(file, 400, 0.8)
+    .then(b64 => { if (isAdd) _addImage = { base64: b64, ext: 'jpg' }; else _editImage = { base64: b64, ext: 'jpg' }; })
+    .catch(() => { showToast('图片处理失败，请换一张试试','error'); });
+  if (isAdd) _addImagePromise = p; else _editImagePromise = p;
+}
+
+function removeEditImage() {
+  document.getElementById('edit-image').value = '';
+  document.getElementById('edit-image-preview').innerHTML = '<div style="font-size:12px;color:var(--text-light)">已标记移除，保存后生效</div>';
+  _editImage = null;
+  _editImageRemoved = true;
+}
+
+function itemImgUrl(item) {
+  if (!item || !item.image) return '';
+  return IMG_BASE + item.image + '?v=' + encodeURIComponent(item.imageUpdated || '');
+}
+
+// 上传图片到 GitHub 仓库 images/ 目录（自动覆盖旧图）
+async function uploadItemImage(itemId, base64) {
+  const path = 'images/' + itemId + '.jpg';
+  let sha = null;
+  try {
+    const res = await fetch('https://api.github.com/repos/Chau223/warehouse-system/contents/' + path, { headers: GH_HEADERS });
+    if (res.ok) sha = (await res.json()).sha;
+  } catch(e) {}
+  const body = JSON.stringify({
+    message: 'Upload item image: ' + itemId,
+    content: base64,
+    ...(sha ? { sha } : {})
+  });
+  try {
+    const res = await fetch('https://api.github.com/repos/Chau223/warehouse-system/contents/' + path, {
+      method: 'PUT',
+      headers: { ...GH_HEADERS, 'Content-Type': 'application/json' },
+      body
+    });
+    return res.ok;
+  } catch(e) { return false; }
+}
+
+// 删除 GitHub 仓库中的图片文件
+async function removeItemImage(itemId) {
+  const path = 'images/' + itemId + '.jpg';
+  try {
+    const res = await fetch('https://api.github.com/repos/Chau223/warehouse-system/contents/' + path, { headers: GH_HEADERS });
+    if (!res.ok) return true; // 文件不存在也算成功
+    const sha = (await res.json()).sha;
+    const delRes = await fetch('https://api.github.com/repos/Chau223/warehouse-system/contents/' + path, {
+      method: 'DELETE',
+      headers: { ...GH_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Remove item image: ' + itemId, sha })
+    });
+    return delRes.ok;
+  } catch(e) { return false; }
+}
+
 // ===== 库存渲染 =====
 function renderInventory() {
   const data = loadLocal();
@@ -392,7 +515,12 @@ function renderInventory() {
   const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const makeCard = (item) => {
     const low = item.quantity < item.threshold;
+    const imgSrc = itemImgUrl(item);
+    const imgHtml = imgSrc
+      ? '<div class="item-img-wrap"><img class="item-img" src="'+esc(imgSrc)+'" loading="lazy" onerror="this.parentNode.innerHTML=\'<span class=&quot;item-img-placeholder&quot;>📦</span>\'"></div>'
+      : '<div class="item-img-wrap"><span class="item-img-placeholder">📦</span></div>';
     return '<div class="item-card'+(low?' low-stock':'')+'">'+
+      imgHtml+
       '<div class="item-name">'+esc(item.name)+'</div>'+
       '<div class="item-qty">'+item.quantity+'</div>'+
       '<div class="item-unit">个（预警: '+item.threshold+'）</div>'+
@@ -432,10 +560,12 @@ function renderInventory() {
 function renderAdminTable() {
   const data = loadLocal();
   const tbody = document.getElementById('admin-table-body');
-  if (!data.items.length) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-light);padding:30px">暂无物资</td></tr>'; return; }
+  if (!data.items.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-light);padding:30px">暂无物资</td></tr>'; return; }
   tbody.innerHTML = data.items.map(item => {
     const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const imgSrc = itemImgUrl(item);
     return '<tr>'+
+      '<td>'+(imgSrc?'<img class="thumb" src="'+esc(imgSrc)+'" loading="lazy" onerror="this.style.visibility=\'hidden\'">':'<span style="font-size:18px;opacity:.3">📦</span>')+'</td>'+
       '<td><b>'+esc(item.name)+'</b></td>'+
       '<td style="color:'+(item.quantity<item.threshold?'var(--danger)':'var(--text)')+'">'+item.quantity+'</td>'+
       '<td>'+item.threshold+'</td>'+
@@ -540,10 +670,18 @@ function openEditModal(id) {
   document.getElementById('edit-name').value = item.name;
   document.getElementById('edit-qty').value = item.quantity;
   document.getElementById('edit-threshold').value = item.threshold;
+  document.getElementById('edit-image').value = '';
+  _editImage = null;
+  _editImagePromise = null;
+  _editImageRemoved = false;
+  const imgSrc = itemImgUrl(item);
+  document.getElementById('edit-image-preview').innerHTML = imgSrc
+    ? '<img src="'+imgSrc+'" class="preview-thumb" alt="当前图片"><div style="font-size:11px;color:var(--text-light);margin-top:4px">当前图片（可重新选择替换）</div>'
+    : '<div style="font-size:12px;color:var(--text-light)">暂无图片</div>';
   document.getElementById('edit-modal').classList.add('active');
 }
-function closeEditModal() { document.getElementById('edit-modal').classList.remove('active'); currentEditId = null; }
-function confirmEdit() {
+function closeEditModal() { document.getElementById('edit-modal').classList.remove('active'); currentEditId = null; _editImage = null; _editImagePromise = null; _editImageRemoved = false; }
+async function confirmEdit() {
   const name = document.getElementById('edit-name').value.trim();
   if (!name) { showToast('名称不能为空','error'); return; }
   const qty = parseInt(document.getElementById('edit-qty').value) || 0;
@@ -551,6 +689,27 @@ function confirmEdit() {
   const data = loadLocal();
   const item = data.items.find(it => it.id === currentEditId);
   if (!item) return;
+
+  // 等待图片压缩完成
+  if (_editImagePromise) { await _editImagePromise; }
+  if (_editImage) {
+    showToast('正在上传图片...','info');
+    const ok = await uploadItemImage(item.id, _editImage.base64);
+    if (ok) {
+      item.image = item.id + '.jpg';
+      item.imageUpdated = Date.now();
+    } else {
+      showToast('图片上传失败，请稍后重试','warning');
+    }
+    _editImage = null;
+  }
+  if (_editImageRemoved) {
+    if (item.image) { removeItemImage(item.id); }
+    delete item.image;
+    delete item.imageUpdated;
+    _editImageRemoved = false;
+  }
+
   const before = item.quantity;
   item.name = name;
   item.quantity = qty;
@@ -564,18 +723,36 @@ function confirmEdit() {
 }
 
 // ===== 管理操作 =====
-function addItem() {
+async function addItem() {
   const name = document.getElementById('add-name').value.trim();
   if (!name) { showToast('请输入物资名称','error'); return; }
   const qty = parseInt(document.getElementById('add-qty').value) || 0;
   const threshold = parseInt(document.getElementById('add-threshold').value) || 3;
   const data = loadLocal();
   const item = { id: genId(), name, quantity: qty, threshold, createdAt: new Date().toISOString() };
+
+  // 等待图片压缩完成，再上传
+  if (_addImagePromise) { await _addImagePromise; }
+  if (_addImage) {
+    showToast('正在上传图片...','info');
+    const ok = await uploadItemImage(item.id, _addImage.base64);
+    if (ok) {
+      item.image = item.id + '.jpg';
+      item.imageUpdated = Date.now();
+    } else {
+      showToast('图片上传失败，稍后可在编辑中重试','warning');
+    }
+    _addImage = null;
+    _addImagePromise = null;
+  }
+
   data.items.push(item);
   data.logs.unshift({ id:'log_'+Date.now().toString(36), itemId:item.id, itemName:item.name, action:'add', quantity:qty, before:0, after:qty, timestamp:new Date().toISOString() });
   saveData(data);
   document.getElementById('add-name').value = '';
   document.getElementById('add-qty').value = '0';
+  document.getElementById('add-image').value = '';
+  document.getElementById('add-image-preview').innerHTML = '';
   showToast('已添加「'+name+'」','success');
   renderInventory();
   renderLogs();
@@ -604,6 +781,7 @@ function deleteItem(id) {
   const idx = data.items.findIndex(it => it.id === id);
   if (idx === -1) return;
   const removed = data.items.splice(idx, 1)[0];
+  if (removed.image) { removeItemImage(id); }  // 异步清理图片文件
   data.logs.unshift({ id:'log_'+Date.now().toString(36), itemId:id, itemName:removed.name, action:'delete', quantity:0, before:removed.quantity, after:0, timestamp:new Date().toISOString() });
   saveData(data);
   showToast('已删除「'+removed.name+'」','success');
