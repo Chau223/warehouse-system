@@ -139,6 +139,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
           <label>预警阈值</label>
           <input type="number" id="add-threshold" placeholder="3" min="1" value="3">
         </div>
+        <div class="form-group">
+          <label>每人限领(0=不限)</label>
+          <input type="number" id="add-limit" placeholder="0" min="0" value="0" title="该物资每人累计最多可领用数量，0 表示不限">
+        </div>
         <div class="form-group" style="flex:1;min-width:160px">
           <label>图片（可选）</label>
           <input type="file" id="add-image" accept="image/*" onchange="previewImage(this,'add-image-preview',true)">
@@ -186,6 +190,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
           <th>名称</th>
           <th>库存</th>
           <th>阈值</th>
+          <th>限领</th>
           <th>操作</th>
         </tr>
       </thead>
@@ -217,6 +222,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
       <label>领用数量</label>
       <input type="number" id="checkout-amount" placeholder="1" min="1" value="1">
     </div>
+    <div id="checkout-limit-hint" style="display:none;font-size:12px;margin:-6px 0 10px;padding:6px 10px;background:#f8f9fa;border-radius:6px;line-height:1.5"></div>
     <div class="form-actions">
       <button class="btn btn-outline btn-block" onclick="closeCheckoutModal()">取消</button>
       <button class="btn btn-danger btn-block" onclick="confirmCheckout()">确认领用</button>
@@ -262,6 +268,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
       <input type="number" id="edit-threshold" min="1">
     </div>
     <div class="form-group">
+      <label>每人限领（0 = 不限）</label>
+      <input type="number" id="edit-limit" min="0" placeholder="0" title="该物资每人累计最多可领用数量，0 表示不限">
+    </div>
+    <div class="form-group">
       <label>物资图片</label>
       <input type="file" id="edit-image" accept="image/*" onchange="previewImage(this,'edit-image-preview',false)">
       <div id="edit-image-preview" style="margin-top:6px"></div>
@@ -290,6 +300,9 @@ const GH_HEADERS = {
   'Accept': 'application/vnd.github.v3+json'
 };
 let _currentSha = null;
+
+// 全局 HTML 转义（防 XSS）
+function esc(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 function getDefaultData() {
   return { items: [], logs: [], nextId: 1 };
@@ -505,7 +518,7 @@ function renderInventory() {
     grid.innerHTML = '';
     empty.style.display = 'block';
     countEl.textContent = '';
-    document.getElementById('admin-table-body').innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-light);padding:30px">暂无物资</td></tr>';
+    document.getElementById('admin-table-body').innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-light);padding:30px">暂无物资</td></tr>';
     return;
   }
 
@@ -560,7 +573,7 @@ function renderInventory() {
 function renderAdminTable() {
   const data = loadLocal();
   const tbody = document.getElementById('admin-table-body');
-  if (!data.items.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-light);padding:30px">暂无物资</td></tr>'; return; }
+  if (!data.items.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-light);padding:30px">暂无物资</td></tr>'; return; }
   tbody.innerHTML = data.items.map(item => {
     const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     const imgSrc = itemImgUrl(item);
@@ -569,6 +582,7 @@ function renderAdminTable() {
       '<td><b>'+esc(item.name)+'</b></td>'+
       '<td style="color:'+(item.quantity<item.threshold?'var(--danger)':'var(--text)')+'">'+item.quantity+'</td>'+
       '<td>'+item.threshold+'</td>'+
+      '<td>'+(item.limitPerPerson?item.limitPerPerson+'<span style="font-size:11px;color:var(--text-light)">/人</span>':'<span style="color:var(--text-light)">—</span>')+'</td>'+
       '<td>'+
         '<button class="btn btn-primary btn-sm" onclick="openEditModal(\''+item.id+'\')">编辑</button> '+
         '<button class="btn btn-outline btn-sm" onclick="restockItem(\''+item.id+'\',\''+esc(item.name).replace(/'/g,"\\'")+'\')">入库</button> '+
@@ -598,12 +612,53 @@ function renderLogs() {
 
 // ===== 领用弹窗 =====
 let currentCheckoutId = null;
+
+// 统计某人累计净领用某物资的数量（领用 - 撤销，edit 不计入）
+function getPersonUsed(itemId, person) {
+  const data = loadLocal();
+  let used = 0;
+  data.logs.forEach(l => {
+    if (l.itemId !== itemId) return;
+    if (!person || l.person !== person) return;
+    if (l.action === 'checkout') used += Math.abs(l.quantity || 0);
+    else if (l.action === 'undo') used -= Math.abs(l.quantity || 0);
+  });
+  return Math.max(0, used);
+}
+
+// 领用弹窗实时显示限额提示
+function updateCheckoutLimitHint() {
+  const hint = document.getElementById('checkout-limit-hint');
+  if (!currentCheckoutId) { hint.style.display = 'none'; return; }
+  const data = loadLocal();
+  const item = data.items.find(it => it.id === currentCheckoutId);
+  if (!item || !item.limitPerPerson) { hint.style.display = 'none'; return; }
+  const limit = item.limitPerPerson;
+  const person = document.getElementById('checkout-person').value.trim();
+  hint.style.display = 'block';
+  if (!person) {
+    hint.innerHTML = '📌 每人限领 <b>'+limit+'</b> 个（累计，含已撤销退还的额度）';
+    hint.style.color = 'var(--text-light)';
+    return;
+  }
+  const used = getPersonUsed(item.id, person);
+  const remain = limit - used;
+  if (remain <= 0) {
+    hint.innerHTML = '🚫 <b>'+esc(person)+'</b> 已领 <b>'+used+'</b>/'+limit+' 个，达到上限，无法再领';
+    hint.style.color = 'var(--danger)';
+  } else {
+    hint.innerHTML = '📌 <b>'+esc(person)+'</b> 已领 <b>'+used+'</b>/'+limit+' 个，还能领 <b>'+remain+'</b> 个';
+    hint.style.color = 'var(--text-light)';
+  }
+}
+
 function openCheckoutModal(id, name) {
   currentCheckoutId = id;
   document.getElementById('checkout-item-name').textContent = name;
   document.getElementById('checkout-person').value = '';
   document.getElementById('checkout-amount').value = '1';
   document.getElementById('checkout-modal').classList.add('active');
+  updateCheckoutLimitHint();
   setTimeout(() => document.getElementById('checkout-person').focus(), 100);
 }
 function closeCheckoutModal() { document.getElementById('checkout-modal').classList.remove('active'); currentCheckoutId = null; }
@@ -616,6 +671,13 @@ function confirmCheckout() {
   const item = data.items.find(it => it.id === currentCheckoutId);
   if (!item) { showToast('物资不存在','error'); return; }
   if (item.quantity < amount) { showToast('库存仅剩 '+item.quantity+' 个，无法领用 '+amount+' 个','error'); return; }
+  // 每人限领校验
+  if (item.limitPerPerson) {
+    const used = getPersonUsed(item.id, person);
+    const remain = item.limitPerPerson - used;
+    if (remain <= 0) { showToast(person+' 已领 '+used+'/'+item.limitPerPerson+' 个，达到上限，无法再领','error'); return; }
+    if (amount > remain) { showToast(person+' 已领 '+used+'/'+item.limitPerPerson+' 个，本次最多再领 '+remain+' 个','error'); return; }
+  }
   const before = item.quantity;
   item.quantity -= amount;
   const low = item.quantity < item.threshold;
@@ -670,6 +732,7 @@ function openEditModal(id) {
   document.getElementById('edit-name').value = item.name;
   document.getElementById('edit-qty').value = item.quantity;
   document.getElementById('edit-threshold').value = item.threshold;
+  document.getElementById('edit-limit').value = item.limitPerPerson || 0;
   document.getElementById('edit-image').value = '';
   _editImage = null;
   _editImagePromise = null;
@@ -686,6 +749,7 @@ async function confirmEdit() {
   if (!name) { showToast('名称不能为空','error'); return; }
   const qty = parseInt(document.getElementById('edit-qty').value) || 0;
   const threshold = parseInt(document.getElementById('edit-threshold').value) || 3;
+  const limitVal = parseInt(document.getElementById('edit-limit').value) || 0;
   const data = loadLocal();
   const item = data.items.find(it => it.id === currentEditId);
   if (!item) return;
@@ -714,6 +778,7 @@ async function confirmEdit() {
   item.name = name;
   item.quantity = qty;
   item.threshold = threshold;
+  if (limitVal > 0) item.limitPerPerson = limitVal; else delete item.limitPerPerson;
   data.logs.unshift({ id:'log_'+Date.now().toString(36), itemId:item.id, itemName:item.name, action:'edit', quantity: item.quantity-before, before, after:item.quantity, timestamp:new Date().toISOString() });
   saveData(data);
   showToast('保存成功','success');
@@ -728,8 +793,10 @@ async function addItem() {
   if (!name) { showToast('请输入物资名称','error'); return; }
   const qty = parseInt(document.getElementById('add-qty').value) || 0;
   const threshold = parseInt(document.getElementById('add-threshold').value) || 3;
+  const addLimit = parseInt(document.getElementById('add-limit').value) || 0;
   const data = loadLocal();
   const item = { id: genId(), name, quantity: qty, threshold, createdAt: new Date().toISOString() };
+  if (addLimit > 0) item.limitPerPerson = addLimit;
 
   // 等待图片压缩完成，再上传
   if (_addImagePromise) { await _addImagePromise; }
@@ -751,6 +818,7 @@ async function addItem() {
   saveData(data);
   document.getElementById('add-name').value = '';
   document.getElementById('add-qty').value = '0';
+  document.getElementById('add-limit').value = '0';
   document.getElementById('add-image').value = '';
   document.getElementById('add-image-preview').innerHTML = '';
   showToast('已添加「'+name+'」','success');
@@ -845,6 +913,8 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { closeCheckoutModal(); closeUndoModal(); closeEditModal(); }
 });
 document.getElementById('checkout-person').addEventListener('keydown', e => { if (e.key === 'Enter') confirmCheckout(); });
+document.getElementById('checkout-person').addEventListener('input', updateCheckoutLimitHint);
+document.getElementById('checkout-amount').addEventListener('input', updateCheckoutLimitHint);
 document.getElementById('undo-person').addEventListener('keydown', e => { if (e.key === 'Enter') confirmUndo(); });
 
 // ===== 通知权限 =====
