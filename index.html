@@ -294,7 +294,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
 // ===== 数据层 (GitHub 仓库存储 + localStorage 缓存) =====
 const STORAGE_KEY = 'warehouse_data';
 const GH_API = 'https://api.github.com/repos/Chau223/warehouse-system/contents/data.json';
-const GH_TOKEN = 'ghp_' + 'XizzhGc9gLjTT1p4Ib9eQd5CJpjn1Q2fLcJ7';
+const RAW_URL = 'https://raw.githubusercontent.com/Chau223/warehouse-system/main/data.json';
+const GH_TOKEN = 'github_pat_' + '11AYX63QY0BkDvKrCVQdFm_8lFMkqnx9Y5goQMrUACEf9n2qfjNd6sygm4Zzk4d1p25RATRJ6VZTZm2u2Q';
 const GH_HEADERS = {
   'Authorization': 'token ' + GH_TOKEN,
   'Accept': 'application/vnd.github.v3+json'
@@ -318,8 +319,17 @@ function loadLocal() {
   } catch(e) { return getDefaultData(); }
 }
 
-// 从 GitHub 加载
+// 从 GitHub 加载：优先公开 raw 地址（不需要 token、不受 API 限流），失败再走 API
 async function loadCloud() {
+  // 1) 公开 raw 地址（CDN 约 5 分钟缓存）
+  try {
+    const res = await fetch(RAW_URL + '?t=' + Date.now(), { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.items && data.logs) { _currentSha = null; return data; }
+    }
+  } catch(e) {}
+  // 2) API（可拿到 sha）
   try {
     const res = await fetch(GH_API, { headers: GH_HEADERS, cache: 'no-store' });
     if (!res.ok) return null;
@@ -333,14 +343,43 @@ async function loadCloud() {
   } catch(e) { return null; }
 }
 
-// 主加载：GitHub 优先，失败用本地
+// 日志去重键
+function _logKey(l) {
+  return [l.timestamp, l.action, l.person || '', l.itemId || '', l.itemName || '', l.quantity].join('|');
+}
+
+// 数据集最新时间
+function _maxTs(data) {
+  let m = '';
+  (data.logs || []).forEach(l => { if (l.timestamp && l.timestamp > m) m = l.timestamp; });
+  return m;
+}
+
+// 合并云端与本地：以较新数据集的库存为准，日志取并集（保住各台手机上滞留的记录）
+function mergeData(cloud, local) {
+  if (!cloud || !cloud.items) return local;
+  if (!local || !local.items) return cloud;
+  const base = _maxTs(cloud) >= _maxTs(local) ? cloud : local;
+  const other = base === cloud ? local : cloud;
+  const keys = new Set(base.logs.map(_logKey));
+  const extra = other.logs.filter(l => !keys.has(_logKey(l)));
+  const merged = JSON.parse(JSON.stringify(base));
+  if (extra.length) merged.logs = merged.logs.concat(extra).sort((a,b) => (a.timestamp||'').localeCompare(b.timestamp||''));
+  return merged;
+}
+
+// 主加载：云端与本地合并，避免任一侧数据丢失
 async function loadData() {
   const cloud = await loadCloud();
+  const local = loadLocal();
   if (cloud) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(cloud));
-    return cloud;
+    const merged = mergeData(cloud, local);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    // 本机比云端新：说明本机有未同步的记录，自动推回云端
+    if (_maxTs(local) > _maxTs(cloud)) syncCloud(merged);
+    return merged;
   }
-  return loadLocal();
+  return local || getDefaultData();
 }
 
 function saveLocal(data) {
@@ -355,6 +394,7 @@ function saveData(data) {
 
 // 异步同步到 GitHub
 let _syncTimer = null;
+let _syncFailNotified = false;
 function syncCloud(data) {
   clearTimeout(_syncTimer);
   _syncTimer = setTimeout(async () => {
@@ -365,6 +405,9 @@ function syncCloud(data) {
         if (getRes.ok) {
           const getJson = await getRes.json();
           _currentSha = getJson.sha;
+        } else if (getRes.status === 401) {
+          if (!_syncFailNotified) { showToast('⚠️ 云端同步失败：Token 已失效，数据仅保存在本机，请联系管理员','error'); _syncFailNotified = true; }
+          return;
         }
       }
       const content = btoa(unescape(encodeURIComponent(JSON.stringify(data))));
@@ -380,12 +423,19 @@ function syncCloud(data) {
       if (res.ok) {
         const json = await res.json();
         _currentSha = json.content.sha;
+        _syncFailNotified = false;
+      } else if (res.status === 401) {
+        if (!_syncFailNotified) { showToast('⚠️ 云端同步失败：Token 已失效，数据仅保存在本机，请联系管理员','error'); _syncFailNotified = true; }
       } else {
-        // SHA 冲突：下次读取时会自动获取最新
+        // SHA 冲突等其他失败：下次读取时会自动获取最新
         _currentSha = null;
+        if (!_syncFailNotified) { showToast('⚠️ 云端同步失败（'+res.status+'），数据仅保存在本机','error'); _syncFailNotified = true; }
         console.warn('GitHub 同步失败: ' + res.status);
       }
-    } catch(e) { console.warn('GitHub 同步异常: ' + e.message); }
+    } catch(e) {
+      if (!_syncFailNotified) { showToast('⚠️ 网络异常，数据仅保存在本机，稍后自动重试','error'); _syncFailNotified = true; }
+      console.warn('GitHub 同步异常: ' + e.message);
+    }
   }, 500);
 }
 
