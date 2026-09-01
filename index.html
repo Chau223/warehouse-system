@@ -55,7 +55,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
 .scan-status.success{background:#eafaf1;color:var(--success);display:block}
 .scan-status.error{background:var(--danger-bg);color:var(--danger);display:block}
 .scan-status.warning{background:#fef9e7;color:#f39c12;display:block}
-.modal-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;justify-content:center;align-items:flex-start;padding-top:15vh}
+.modal-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;justify-content:center;align-items:flex-start;padding:8vh 0;overflow-y:auto;-webkit-overflow-scrolling:touch}
 .modal-overlay.active{display:flex}
 .modal{background:var(--card);border-radius:var(--radius);padding:24px;width:90%;max-width:400px;box-shadow:0 8px 32px rgba(0,0,0,0.2)}
 .modal h3{font-size:17px;margin-bottom:16px;text-align:center}
@@ -660,6 +660,16 @@ function renderLogs() {
   }).join('');
 }
 
+// ===== 弹窗开关（打开时锁住背景滚动，防止滚动穿透到页面） =====
+function openOverlay(id) {
+  document.getElementById(id).classList.add('active');
+  document.body.style.overflow = 'hidden';
+}
+function closeOverlay(id) {
+  document.getElementById(id).classList.remove('active');
+  document.body.style.overflow = '';
+}
+
 // ===== 领用弹窗 =====
 let currentCheckoutId = null;
 
@@ -707,11 +717,11 @@ function openCheckoutModal(id, name) {
   document.getElementById('checkout-item-name').textContent = name;
   document.getElementById('checkout-person').value = '';
   document.getElementById('checkout-amount').value = '1';
-  document.getElementById('checkout-modal').classList.add('active');
+  openOverlay('checkout-modal');
   updateCheckoutLimitHint();
   setTimeout(() => document.getElementById('checkout-person').focus(), 100);
 }
-function closeCheckoutModal() { document.getElementById('checkout-modal').classList.remove('active'); currentCheckoutId = null; }
+function closeCheckoutModal() { closeOverlay('checkout-modal'); currentCheckoutId = null; }
 function confirmCheckout() {
   const person = document.getElementById('checkout-person').value.trim();
   if (!person) { showToast('请输入领用人姓名','error'); document.getElementById('checkout-person').focus(); return; }
@@ -750,10 +760,10 @@ function openUndoModal(id, name) {
   document.getElementById('undo-item-name').textContent = name;
   document.getElementById('undo-person').value = '';
   document.getElementById('undo-amount').value = '1';
-  document.getElementById('undo-modal').classList.add('active');
+  openOverlay('undo-modal');
   setTimeout(() => document.getElementById('undo-person').focus(), 100);
 }
-function closeUndoModal() { document.getElementById('undo-modal').classList.remove('active'); currentUndoId = null; }
+function closeUndoModal() { closeOverlay('undo-modal'); currentUndoId = null; }
 function confirmUndo() {
   const person = document.getElementById('undo-person').value.trim();
   const amount = parseInt(document.getElementById('undo-amount').value) || 1;
@@ -791,9 +801,9 @@ function openEditModal(id) {
   document.getElementById('edit-image-preview').innerHTML = imgSrc
     ? '<img src="'+imgSrc+'" class="preview-thumb" alt="当前图片"><div style="font-size:11px;color:var(--text-light);margin-top:4px">当前图片（可重新选择替换）</div>'
     : '<div style="font-size:12px;color:var(--text-light)">暂无图片</div>';
-  document.getElementById('edit-modal').classList.add('active');
+  openOverlay('edit-modal');
 }
-function closeEditModal() { document.getElementById('edit-modal').classList.remove('active'); currentEditId = null; _editImage = null; _editImagePromise = null; _editImageRemoved = false; }
+function closeEditModal() { closeOverlay('edit-modal'); currentEditId = null; _editImage = null; _editImagePromise = null; _editImageRemoved = false; }
 async function confirmEdit() {
   const name = document.getElementById('edit-name').value.trim();
   if (!name) { showToast('名称不能为空','error'); return; }
