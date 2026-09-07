@@ -319,9 +319,21 @@ function loadLocal() {
   } catch(e) { return getDefaultData(); }
 }
 
-// 从 GitHub 加载：优先公开 raw 地址（不需要 token、不受 API 限流），失败再走 API
+// 从 GitHub 加载：优先 API（无 CDN 缓存、强一致，避免读到几分钟前的旧数据把别人刚改的覆盖掉），失败再走公开 raw 地址兜底
 async function loadCloud() {
-  // 1) 公开 raw 地址（CDN 约 5 分钟缓存）
+  // 1) API（带 token，可拿到 sha，无缓存）
+  try {
+    const res = await fetch(GH_API, { headers: GH_HEADERS, cache: 'no-store' });
+    if (res.ok) {
+      const json = await res.json();
+      _currentSha = json.sha;
+      const binary = atob(json.content.replace(/\s/g, ''));
+      const text = decodeURIComponent(escape(binary));
+      const data = JSON.parse(text);
+      if (data.items && data.logs) return data;
+    }
+  } catch(e) {}
+  // 2) 公开 raw 地址兜底（无需 token，但 CDN 约 5 分钟缓存，可能读到旧数据）
   try {
     const res = await fetch(RAW_URL + '?t=' + Date.now(), { cache: 'no-store' });
     if (res.ok) {
@@ -329,18 +341,7 @@ async function loadCloud() {
       if (data.items && data.logs) { _currentSha = null; return data; }
     }
   } catch(e) {}
-  // 2) API（可拿到 sha）
-  try {
-    const res = await fetch(GH_API, { headers: GH_HEADERS, cache: 'no-store' });
-    if (!res.ok) return null;
-    const json = await res.json();
-    _currentSha = json.sha;
-    const binary = atob(json.content.replace(/\s/g, ''));
-    const text = decodeURIComponent(escape(binary));
-    const data = JSON.parse(text);
-    if (!data.items || !data.logs) return null;
-    return data;
-  } catch(e) { return null; }
+  return null;
 }
 
 // 日志去重键
@@ -355,17 +356,26 @@ function _maxTs(data) {
   return m;
 }
 
-// 合并云端与本地：以较新数据集的库存为准，日志取并集（保住各台手机上滞留的记录）
+// 合并云端与本地：日志按去重键取并集；每个物资的数量按"影响该物资的最新一条日志"的 after 值校准
+// （旧逻辑整份采用较新一侧的库存，会把另一侧刚做的修改冲掉；新逻辑两边对不同物资的修改都能保留）
 function mergeData(cloud, local) {
   if (!cloud || !cloud.items) return local;
   if (!local || !local.items) return cloud;
+  // 1) 日志并集（按去重键）
+  const seen = new Map();
+  (cloud.logs || []).concat(local.logs || []).forEach(l => seen.set(_logKey(l), l));
+  const logs = Array.from(seen.values()).sort((a,b) => (a.timestamp||'').localeCompare(b.timestamp||''));
+  // 2) 物资清单以较新一侧为基础（保住图片等元数据）
   const base = _maxTs(cloud) >= _maxTs(local) ? cloud : local;
-  const other = base === cloud ? local : cloud;
-  const keys = new Set(base.logs.map(_logKey));
-  const extra = other.logs.filter(l => !keys.has(_logKey(l)));
-  const merged = JSON.parse(JSON.stringify(base));
-  if (extra.length) merged.logs = merged.logs.concat(extra).sort((a,b) => (a.timestamp||'').localeCompare(b.timestamp||''));
-  return merged;
+  const items = JSON.parse(JSON.stringify(base.items));
+  // 3) 每个物资：找影响它的最新日志，数量校准为该日志的 after
+  const lastLogByItem = {};
+  logs.forEach(l => { if (l.itemId) lastLogByItem[l.itemId] = l; });
+  items.forEach(it => {
+    const l = lastLogByItem[it.id];
+    if (l && typeof l.after === 'number') it.quantity = l.after;
+  });
+  return { items, logs, nextId: Math.max(cloud.nextId||1, local.nextId||1) };
 }
 
 // 主加载：云端与本地合并，避免任一侧数据丢失
@@ -397,46 +407,61 @@ let _syncTimer = null;
 let _syncFailNotified = false;
 function syncCloud(data) {
   clearTimeout(_syncTimer);
-  _syncTimer = setTimeout(async () => {
-    try {
-      // 如果没有 SHA，先获取最新
-      if (!_currentSha) {
-        const getRes = await fetch(GH_API, { headers: GH_HEADERS, cache: 'no-store' });
-        if (getRes.ok) {
-          const getJson = await getRes.json();
-          _currentSha = getJson.sha;
-        } else if (getRes.status === 401) {
-          if (!_syncFailNotified) { showToast('⚠️ 云端同步失败：Token 已失效，数据仅保存在本机，请联系管理员','error'); _syncFailNotified = true; }
-          return;
-        }
-      }
-      const content = btoa(unescape(encodeURIComponent(JSON.stringify(data))));
-      const res = await fetch(GH_API, {
-        method: 'PUT',
-        headers: { ...GH_HEADERS, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: 'Update warehouse data',
-          content: content,
-          sha: _currentSha
-        })
-      });
-      if (res.ok) {
-        const json = await res.json();
-        _currentSha = json.content.sha;
-        _syncFailNotified = false;
-      } else if (res.status === 401) {
+  _syncTimer = setTimeout(() => syncCloudNow(data, false), 500);
+}
+async function syncCloudNow(data, isRetry) {
+  try {
+    // 如果没有 SHA，先获取最新云端；同时把云端最新数据合并进来，防止用旧数据覆盖别人的修改
+    if (!_currentSha) {
+      const getRes = await fetch(GH_API, { headers: GH_HEADERS, cache: 'no-store' });
+      if (getRes.ok) {
+        const getJson = await getRes.json();
+        _currentSha = getJson.sha;
+        try {
+          const binary = atob(getJson.content.replace(/\s/g, ''));
+          const text = decodeURIComponent(escape(binary));
+          const cloud = JSON.parse(text);
+          if (cloud.items && cloud.logs) {
+            const merged = mergeData(cloud, data);
+            data = merged;
+            saveLocal(merged); // 本地同步为合并后的数据，保持一致
+          }
+        } catch(e) {}
+      } else if (getRes.status === 401) {
         if (!_syncFailNotified) { showToast('⚠️ 云端同步失败：Token 已失效，数据仅保存在本机，请联系管理员','error'); _syncFailNotified = true; }
-      } else {
-        // SHA 冲突等其他失败：下次读取时会自动获取最新
-        _currentSha = null;
-        if (!_syncFailNotified) { showToast('⚠️ 云端同步失败（'+res.status+'），数据仅保存在本机','error'); _syncFailNotified = true; }
-        console.warn('GitHub 同步失败: ' + res.status);
+        return;
       }
-    } catch(e) {
-      if (!_syncFailNotified) { showToast('⚠️ 网络异常，数据仅保存在本机，稍后自动重试','error'); _syncFailNotified = true; }
-      console.warn('GitHub 同步异常: ' + e.message);
     }
-  }, 500);
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(data))));
+    const res = await fetch(GH_API, {
+      method: 'PUT',
+      headers: { ...GH_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: 'Update warehouse data',
+        content: content,
+        sha: _currentSha
+      })
+    });
+    if (res.ok) {
+      const json = await res.json();
+      _currentSha = json.content.sha;
+      _syncFailNotified = false;
+    } else if (res.status === 401) {
+      if (!_syncFailNotified) { showToast('⚠️ 云端同步失败：Token 已失效，数据仅保存在本机，请联系管理员','error'); _syncFailNotified = true; }
+    } else if (res.status === 409 && !isRetry) {
+      // 版本冲突：说明云端刚被别人改过。重新拉最新、合并后自动重试一次
+      _currentSha = null;
+      await syncCloudNow(data, true);
+    } else {
+      // 其他失败：下次读取时会自动获取最新
+      _currentSha = null;
+      if (!_syncFailNotified) { showToast('⚠️ 云端同步失败（'+res.status+'），数据仅保存在本机','error'); _syncFailNotified = true; }
+      console.warn('GitHub 同步失败: ' + res.status);
+    }
+  } catch(e) {
+    if (!_syncFailNotified) { showToast('⚠️ 网络异常，数据仅保存在本机，稍后自动重试','error'); _syncFailNotified = true; }
+    console.warn('GitHub 同步异常: ' + e.message);
+  }
 }
 
 function genId() {
