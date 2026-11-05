@@ -364,13 +364,17 @@ function mergeData(cloud, local) {
   // 1) 日志并集（按去重键）
   const seen = new Map();
   (cloud.logs || []).concat(local.logs || []).forEach(l => seen.set(_logKey(l), l));
-  const logs = Array.from(seen.values()).sort((a,b) => (a.timestamp||'').localeCompare(b.timestamp||''));
+  const logs = Array.from(seen.values()).sort((a,b) => (b.timestamp||'').localeCompare(a.timestamp||''));
   // 2) 物资清单以较新一侧为基础（保住图片等元数据）
   const base = _maxTs(cloud) >= _maxTs(local) ? cloud : local;
   const items = JSON.parse(JSON.stringify(base.items));
-  // 3) 每个物资：找影响它的最新日志，数量校准为该日志的 after
+  // 3) 每个物资：找影响它的最新日志（按时间戳比较，不依赖数组顺序），数量校准为该日志的 after
   const lastLogByItem = {};
-  logs.forEach(l => { if (l.itemId) lastLogByItem[l.itemId] = l; });
+  logs.forEach(l => {
+    if (!l.itemId) return;
+    const prev = lastLogByItem[l.itemId];
+    if (!prev || (l.timestamp||'') >= (prev.timestamp||'')) lastLogByItem[l.itemId] = l;
+  });
   items.forEach(it => {
     const l = lastLogByItem[it.id];
     if (l && typeof l.after === 'number') it.quantity = l.after;
@@ -671,7 +675,9 @@ function renderLogs() {
   document.getElementById('log-count').textContent = '共 ' + data.logs.length + ' 条';
   const list = document.getElementById('log-list');
   if (!data.logs.length) { list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-light)">暂无记录</div>'; return; }
-  list.innerHTML = data.logs.slice(0,200).map(log => {
+  // 统一按时间倒序（最新在前）再截取前 200 条，避免数组顺序混乱导致看不到最近记录
+  const sorted = data.logs.slice().sort((a,b) => (b.timestamp||'').localeCompare(a.timestamp||''));
+  list.innerHTML = sorted.slice(0,200).map(log => {
     const dt = new Date(log.timestamp);
     const time = dt.toLocaleString('zh-CN');
     const actionLabels = {checkout:'领用',undo:'撤销',add:'新增',edit:'编辑',restock:'入库',delete:'删除',import:'导入'};
